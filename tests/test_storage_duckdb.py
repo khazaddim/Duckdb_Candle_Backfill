@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 from duckdb_candle_backfill import (
@@ -162,3 +163,27 @@ async def test_storage_operations_do_not_block_event_loop(tmp_path: Path) -> Non
         await storage.close()
 
     assert heartbeat_ticks > 0
+
+
+async def test_storage_serializes_operations_on_one_background_thread(tmp_path: Path) -> None:
+    """Verify concurrent calls are executed on one dedicated off-loop worker thread."""
+    database_path = tmp_path / "single_writer_thread_test.duckdb"
+    storage = connect_duckdb(database_path)
+
+    try:
+        await initialize_schema(storage)
+
+        def current_thread_name(_connection: object, marker: int) -> tuple[int, str]:
+            return marker, threading.current_thread().name
+
+        results = await asyncio.gather(
+            *(storage.run(current_thread_name, i) for i in range(20))
+        )
+    finally:
+        await storage.close()
+
+    markers = {marker for marker, _ in results}
+    thread_names = {name for _, name in results}
+    assert markers == set(range(20))
+    assert len(thread_names) == 1
+    assert next(iter(thread_names)).startswith("duckdb-backfill")

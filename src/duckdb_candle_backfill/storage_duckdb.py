@@ -18,6 +18,9 @@ class DuckDBStorage:
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        # DuckDB work is serialized through one dedicated worker thread:
+        # this preserves single-writer behavior and keeps blocking DB calls
+        # off the asyncio event-loop thread.
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="duckdb-backfill")
         self._connection: duckdb.DuckDBPyConnection | None = None
         self._closed = False
